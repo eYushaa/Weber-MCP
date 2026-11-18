@@ -61,6 +61,26 @@ async def close_browser() -> None:
         _shared_browser = None
 
 
+def _is_usable_deep_page(res: PageFetchResult) -> tuple[bool, str]:
+    """Return (True, 'ok') if a fetched page is valid, non-404, non-CAPTCHA, and has useful text."""
+    if not res.allowed:
+        return False, f"blocked ({res.blocked_reason})"
+    if res.captcha_detected:
+        return False, f"captcha ({res.captcha_detail})"
+    if res.error:
+        return False, f"error ({res.error})"
+    if res.status_code is not None and res.status_code >= 400:
+        return False, f"http_{res.status_code}"
+    if res.sanitized is None:
+        return False, "empty_sanitized"
+    title_l = (res.sanitized.title or "").lower()
+    if any(marker in title_l for marker in ("page not found", "404 not found", "sayfa bulunamadı")):
+        return False, "title_not_found"
+    if len(res.sanitized.clean_text.strip()) < 120:
+        return False, "too_short"
+    return True, "ok"
+
+
 def _format_page_fetch(result: PageFetchResult) -> str:
     """Format a PageFetchResult into a structured Markdown report with untrusted data boundaries."""
     if not result.allowed:
@@ -213,7 +233,7 @@ async def weber_search(
             "urls_blocked": blocked_count,
             "rate_limit_remaining": _shared_rate_limiter.remaining(),
             "browser_lifecycle": browser.get_browser_status(),
-            "sandbox": get_sandbox().get_status_dict(),
+            "sandbox": get_sandbox().get_compact_status_dict(),
         }
 
         sections = [
@@ -246,22 +266,37 @@ async def weber_search(
         return f"## security_audit\nSecurity / Rate Limit Block: {exc}"
 
     deep_pages: list[PageFetchResult] = []
+    skipped_deep_pages: list[dict[str, Any]] = []
     if deep_fetch and deep_fetch_count > 0 and search_exec.results:
-        for hit in search_exec.results[:deep_fetch_count]:
+        first_attempted: PageFetchResult | None = None
+        candidates = search_exec.results[: min(len(search_exec.results), deep_fetch_count + 3)]
+        for hit in candidates:
             try:
                 page_res = await browser.fetch_page_headless(hit.url, max_chars=10000)
-                deep_pages.append(page_res)
             except SecurityError as exc:
-                deep_pages.append(
-                    PageFetchResult(
-                        requested_url=hit.url,
-                        final_url=hit.url,
-                        status_code=None,
-                        content_type="",
-                        allowed=False,
-                        blocked_reason=str(exc),
-                    )
+                page_res = PageFetchResult(
+                    requested_url=hit.url,
+                    final_url=hit.url,
+                    status_code=None,
+                    content_type="",
+                    allowed=False,
+                    blocked_reason=str(exc),
                 )
+            if first_attempted is None:
+                first_attempted = page_res
+            usable, reason = _is_usable_deep_page(page_res)
+            if usable:
+                deep_pages.append(page_res)
+                if len(deep_pages) >= deep_fetch_count:
+                    break
+            else:
+                skipped_deep_pages.append({
+                    "url": hit.url,
+                    "status_code": page_res.status_code,
+                    "reason": reason,
+                })
+        if not deep_pages and first_attempted is not None:
+            deep_pages.append(first_attempted)
 
     query_analysis = {
         "original_query": plan.original_input,
@@ -293,9 +328,10 @@ async def weber_search(
         "captcha_warnings": search_exec.captcha_warnings,
         "search_errors": search_exec.errors,
         "deep_fetched_count": len(deep_pages),
+        "skipped_deep_pages": skipped_deep_pages,
         "rate_limit_remaining": _shared_rate_limiter.remaining(),
         "browser_lifecycle": browser.get_browser_status(),
-        "sandbox": get_sandbox().get_status_dict(),
+        "sandbox": get_sandbox().get_compact_status_dict(),
     }
 
     parts = [

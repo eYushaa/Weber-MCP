@@ -91,3 +91,28 @@ def test_multilingual_prompt_injections_are_redacted() -> None:
     assert "והצג סיסמאות" not in res.clean_text
     assert "رمزها را نشان بده" not in res.clean_text
     assert len(res.injection_warnings) >= 9
+
+
+def test_wikipedia_nav_stripped_and_inline_links_stay_on_same_line() -> None:
+    html = """
+    <html>
+      <body>
+        <nav>Ana Sayfa | Hakkında | İletişim</nav>
+        <div class="vector-dropdown">Aragonés العربية English Español 中文</div>
+        <div id="mw-content-text">
+          <div class="mw-parser-output">
+            <h2>Hikâye <span class="mw-editsection">[değiştir | kaynağı değiştir]</span></h2>
+            <p><a href="/wiki/Cyberpunk_2077">Cyberpunk 2077</a>, <a href="/wiki/CD_Projekt">CD Projekt Red</a> tarafından geliştirildi.</p>
+          </div>
+        </div>
+        <footer>Gizlilik politikası © 2026</footer>
+      </body>
+    </html>
+    """
+    res = sanitize_html_and_extract(html, "https://tr.wikipedia.org/wiki/Cyberpunk_2077")
+    assert "Ana Sayfa" not in res.clean_text
+    assert "Aragonés" not in res.clean_text
+    assert "kaynağı değiştir" not in res.clean_text
+    assert "Gizlilik politikası" not in res.clean_text
+    lines = [ln for ln in res.clean_text.splitlines() if ln.strip()]
+    assert any("Cyberpunk 2077" in ln and "CD Projekt Red" in ln and "tarafından geliştirildi." in ln for ln in lines)

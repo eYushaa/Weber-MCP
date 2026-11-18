@@ -37,6 +37,52 @@ DANGEROUS_TAGS = frozenset({
     "area",
 })
 
+BOILERPLATE_TAGS = ("nav", "aside", "footer", "menu", "menuitem", "dialog")
+
+BOILERPLATE_SELECTORS = (
+    "[role='navigation']",
+    "[role='contentinfo']",
+    "[role='complementary']",
+    "[role='search']",
+    ".mw-editsection",
+    ".mw-jump-link",
+    ".vector-page-toolbar",
+    ".vector-header-container",
+    ".vector-column-start",
+    ".vector-column-end",
+    ".vector-menu",
+    ".vector-dropdown",
+    "#p-lang",
+    ".interlanguage-link",
+    ".navbox",
+    ".catlinks",
+    ".printfooter",
+    ".sidebar",
+    ".cookie-banner",
+    ".popup",
+)
+
+_BLOCK_LEVEL_TAGS = frozenset({
+    "p",
+    "div",
+    "li",
+    "tr",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "blockquote",
+    "pre",
+    "section",
+    "article",
+    "dt",
+    "dd",
+    "th",
+    "td",
+})
+
 _HIDDEN_STYLE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("display:none", re.compile(r"display\s*:\s*none\b", re.IGNORECASE)),
     ("visibility:hidden", re.compile(r"visibility\s*:\s*(?:hidden|collapse)\b", re.IGNORECASE)),
@@ -366,9 +412,37 @@ def sanitize_html_and_extract(
             if len(links) >= 40:
                 break
 
-    # 6. Extract main content text
-    main_container = soup.find("main") or soup.find("article") or soup.body or soup
-    raw_text = main_container.get_text("\n", strip=True)
+    # 6. Extract main content text (strip navigation/boilerplate chrome, keep inline tags together)
+    main_container = (
+        soup.select_one("#mw-content-text .mw-parser-output")
+        or soup.find("article")
+        or soup.find("main")
+        or soup.find(attrs={"role": "main"})
+        or soup.body
+        or soup
+    )
+    fallback_snapshot = str(main_container)
+
+    for tag in list(main_container.find_all(BOILERPLATE_TAGS)):
+        if tag is not main_container and tag.attrs is not None:
+            tag.decompose()
+    for selector in BOILERPLATE_SELECTORS:
+        for tag in list(main_container.select(selector)):
+            if tag is not main_container and tag.attrs is not None:
+                tag.decompose()
+
+    if not _normalize_whitespace(main_container.get_text(" ", strip=False)):
+        # Restore container if boilerplate removal emptied the entire selected container
+        restored = BeautifulSoup(fallback_snapshot, "html.parser")
+        main_container = restored
+
+    for br_tag in list(main_container.find_all("br")):
+        br_tag.replace_with("\n")
+    for block_tag in list(main_container.find_all(_BLOCK_LEVEL_TAGS)):
+        if block_tag.attrs is not None:
+            block_tag.append("\n")
+
+    raw_text = main_container.get_text(" ", strip=False)
     normalized_text = _normalize_whitespace(raw_text)
 
     clean_title, title_warnings = scan_and_redact_injections(_normalize_whitespace(raw_title))

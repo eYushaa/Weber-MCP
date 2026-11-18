@@ -59,7 +59,47 @@ async def test_live_weber_search_metro_exodus() -> None:
         assert "Metro Exodus Hikayesi" in report
         assert "search_results" in report
         assert "security_audit" in report
+        assert "skipped_deep_pages" in report
+        assert '"stripped_vars"' not in report
         # Ensure we actually got search hits OR a clear anti-bot report if engines gated
         assert ("http" in report) or ("captcha_warnings" in report)
     finally:
         await close_browser()
+
+
+def test_is_usable_deep_page_skips_404_and_accepts_valid() -> None:
+    from weber_mcp.browser import PageFetchResult
+    from weber_mcp.sanitizer import SanitizedContent
+    from weber_mcp.server import _is_usable_deep_page
+
+    page_404 = PageFetchResult(
+        requested_url="https://example.com/missing",
+        final_url="https://example.com/missing",
+        status_code=404,
+        content_type="text/html",
+        allowed=True,
+        sanitized=SanitizedContent(
+            title="Page Not Found",
+            clean_text="Not found " * 30,
+            wrapped_content="<untrusted_web_content>...</untrusted_web_content>",
+        ),
+    )
+    ok_404, reason_404 = _is_usable_deep_page(page_404)
+    assert ok_404 is False
+    assert reason_404 == "http_404"
+
+    page_200_valid = PageFetchResult(
+        requested_url="https://example.com/good",
+        final_url="https://example.com/good",
+        status_code=200,
+        content_type="text/html",
+        allowed=True,
+        sanitized=SanitizedContent(
+            title="Cyberpunk 2077",
+            clean_text="Cyberpunk 2077 is an open-world action-adventure RPG set in Night City. " * 4,
+            wrapped_content="<untrusted_web_content>...</untrusted_web_content>",
+        ),
+    )
+    ok_200, reason_200 = _is_usable_deep_page(page_200_valid)
+    assert ok_200 is True
+    assert reason_200 == "ok"

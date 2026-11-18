@@ -485,6 +485,14 @@ class WeberSandbox:
             },
         }
 
+    def get_compact_status_dict(self) -> dict[str, Any]:
+        """Return compact sandbox status omitting verbose stripped_vars list for search payloads."""
+        status = self.get_status_dict()
+        env_layer = status["layers"].get("env_sanitization")
+        if isinstance(env_layer, dict):
+            env_layer.pop("stripped_vars", None)
+        return status
+
     def cleanup(self) -> None:
         """Remove ephemeral sandbox directory on process exit."""
         if self.sandbox_root and os.path.isdir(self.sandbox_root):
