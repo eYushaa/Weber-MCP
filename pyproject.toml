@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "weber-mcp"
+version = "1.0.0"
+description = "Ultra-secure Playwright-powered MCP server for intelligent web search and safe URL inspection."
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.10"
+dependencies = [
+    "mcp>=1.2.0",
+    "playwright>=1.40.0",
+    "beautifulsoup4>=4.12.0",
+    "pydantic>=2.0.0",
+    "dnspython>=2.4.0",
+    "pywin32>=306; sys_platform == 'win32'",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+]
+
+[project.scripts]
+weber-mcp = "weber_mcp.server:main"
+
+[tool.setuptools.packages.find]
+include = ["weber_mcp*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]

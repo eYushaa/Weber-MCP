@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "weber-mcp": {
+      "command": "python",
+      "args": [
+        "-m",
+        "weber_mcp.server"
+      ],
+      "cwd": "c:\\Users\\ahmet\\Downloads\\Weber-MCP"
+    }
+  }
+}
