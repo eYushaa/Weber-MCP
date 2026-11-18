@@ -105,3 +105,58 @@ def test_raw_fallback_and_non_url_dotted_names() -> None:
     assert ar_fallback.is_direct_url is False
     assert ar_fallback.query_source == "raw_fallback"
     assert ar_fallback.primary_query == "ما هو Rust"
+
+
+@pytest.mark.asyncio
+async def test_string_coercion_for_intent_keywords_and_search_queries() -> None:
+    import json
+
+    from weber_mcp.server import mcp
+
+    # 1. Delimited strings passed directly to transform_query
+    plan_delim = transform_query(
+        "şu anda internet erişimim var mı?",
+        search_queries="şu anki internet erişim durumu, yapay zeka internete bağlanabiliyor mu",
+        intent="general_search",
+        extracted_entity="İnternet Erişimi",
+        intent_keywords="internet bağlantısı, web erişimi",
+        language="tr",
+    )
+    assert plan_delim.query_source == "caller_ai"
+    assert plan_delim.expanded_queries == [
+        "şu anki internet erişim durumu",
+        "yapay zeka internete bağlanabiliyor mu",
+    ]
+    assert plan_delim.intent_keywords == ["internet bağlantısı", "web erişimi"]
+
+    # 2. JSON-stringified array
+    plan_json_str = transform_query(
+        "test",
+        search_queries='["q1", "q2"]',
+        intent_keywords='["k1", "k2"]',
+    )
+    assert plan_json_str.expanded_queries == ["q1", "q2"]
+    assert plan_json_str.intent_keywords == ["k1", "k2"]
+
+    # 3. End-to-end MCP tool call validation with string intent_keywords
+    res = await mcp.call_tool(
+        "weber_transform_query",
+        {
+            "question": "şu anda internet erişimim var mı?",
+            "extracted_entity": "İnternet Erişimi",
+            "intent": "general_search",
+            "intent_keywords": "internet bağlantısı, web erişimi",
+            "language": "tr",
+            "search_queries": [
+                "şu anki internet erişim durumu",
+                "yapay zeka internete bağlanabiliyor mu",
+            ],
+        },
+    )
+    assert res.is_error is False
+    payload = json.loads(res.content[0].text)
+    assert payload["intent_keywords"] == ["internet bağlantısı", "web erişimi"]
+    assert payload["expanded_queries"] == [
+        "şu anki internet erişim durumu",
+        "yapay zeka internete bağlanabiliyor mu",
+    ]

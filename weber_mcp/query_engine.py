@@ -92,6 +92,35 @@ def _extract_urls(raw_input: str) -> tuple[list[str], str]:
     return urls, remaining_clean
 
 
+def coerce_str_list(
+    value: list[str] | str | None,
+    split_commas: bool = True,
+) -> list[str]:
+    """Normalize a list of strings, JSON array string, or delimited string into list[str]."""
+    if value is None:
+        return []
+
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return []
+        if raw.startswith("[") and raw.endswith("]"):
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, list):
+                    return [str(item).strip() for item in parsed if str(item).strip()]
+            except (json.JSONDecodeError, TypeError):
+                pass
+        pattern = r"[\n\r;|,]+" if split_commas else r"[\n\r;|]+"
+        return [part.strip() for part in re.split(pattern, raw) if part.strip()]
+
+    single = str(value).strip()
+    return [single] if single else []
+
+
 def _dedupe_queries(queries: list[str]) -> list[str]:
     """Preserve order while removing empty or case-insensitive duplicate queries."""
     out: list[str] = []
@@ -180,18 +209,20 @@ def parse_ai_query_json(raw_text: str, original_input: str) -> QueryPlan | None:
 
 def transform_query(
     raw_input: str,
-    search_queries: list[str] | None = None,
+    search_queries: list[str] | str | None = None,
     intent: str = "general_search",
     extracted_entity: str = "",
     domain_category: str = "general",
-    intent_keywords: list[str] | None = None,
+    intent_keywords: list[str] | str | None = None,
     language: str = "auto",
 ) -> QueryPlan:
     """Build a QueryPlan from direct URLs, AI-supplied queries, or universal raw cleanup."""
     original = raw_input or ""
     cleaned_raw = re.sub(r"\s+", " ", original).strip()
+    coerced_queries = coerce_str_list(search_queries)
+    coerced_keywords = coerce_str_list(intent_keywords)
 
-    if not cleaned_raw and not search_queries:
+    if not cleaned_raw and not coerced_queries:
         return QueryPlan(original_input=original, detected_language=language)
 
     # 1. Direct URL detection takes priority
@@ -213,12 +244,12 @@ def transform_query(
         )
 
     # 2. Caller AI supplied optimized search queries
-    cleaned_ai_queries = _dedupe_queries(search_queries or [])
+    cleaned_ai_queries = _dedupe_queries(coerced_queries)
     if cleaned_ai_queries:
         entity = extracted_entity.strip() or cleaned_ai_queries[0]
         keywords = (
-            _dedupe_queries([k.casefold() for k in intent_keywords if k.strip()])
-            if intent_keywords
+            _dedupe_queries([k.casefold() for k in coerced_keywords if k.strip()])
+            if coerced_keywords
             else _infer_keywords(*cleaned_ai_queries, entity)
         )
         return QueryPlan(
@@ -238,8 +269,8 @@ def transform_query(
     fallback_queries = _dedupe_queries([stripped_core])
     entity = extracted_entity.strip() or stripped_core
     keywords = (
-        _dedupe_queries([k.casefold() for k in intent_keywords if k.strip()])
-        if intent_keywords
+        _dedupe_queries([k.casefold() for k in coerced_keywords if k.strip()])
+        if coerced_keywords
         else _infer_keywords(stripped_core)
     )
     return QueryPlan(
@@ -257,11 +288,11 @@ def transform_query(
 
 async def generate_query_plan_with_ai(
     raw_input: str,
-    search_queries: list[str] | None = None,
+    search_queries: list[str] | str | None = None,
     intent: str = "general_search",
     extracted_entity: str = "",
     domain_category: str = "general",
-    intent_keywords: list[str] | None = None,
+    intent_keywords: list[str] | str | None = None,
     language: str = "auto",
     ctx: Any = None,
 ) -> QueryPlan:

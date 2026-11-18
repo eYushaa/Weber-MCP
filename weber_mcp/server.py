@@ -18,6 +18,7 @@ except ImportError:  # pragma: no cover - compatibility fallback for mcp < 2.0
 from weber_mcp.browser import HardenedBrowser, PageFetchResult
 from weber_mcp.query_engine import (
     _dedupe_queries,
+    coerce_str_list,
     generate_query_plan_with_ai,
     transform_query,
 )
@@ -132,11 +133,11 @@ def _format_page_fetch(result: PageFetchResult) -> str:
 @mcp.tool()
 async def weber_search(
     query: str,
-    search_queries: list[str] | None = None,
+    search_queries: list[str] | str | None = None,
     intent: str = "general_search",
     extracted_entity: str = "",
-    intent_keywords: list[str] | None = None,
-    custom_queries: list[str] | None = None,
+    intent_keywords: list[str] | str | None = None,
+    custom_queries: list[str] | str | None = None,
     max_results: int = 5,
     deep_fetch: bool = True,
     deep_fetch_count: int = 2,
@@ -155,10 +156,10 @@ async def weber_search(
 
     Parameters:
     - query: Original user question, keywords, or a direct URL to inspect.
-    - search_queries: 2-4 AI-generated search queries tailored to the user's intent and language.
+    - search_queries: 2-4 AI-generated search queries tailored to the user's intent and language (list of strings or comma-separated string).
     - intent: Detected intent (e.g., "story_subject", "definition", "how_to", "troubleshooting", "biography", "comparison", "review_specs", "general_search").
     - extracted_entity: Main subject extracted from the user's question (e.g., "Metro Exodus").
-    - intent_keywords: Keywords used to boost relevance ranking of search results.
+    - intent_keywords: Keywords used to boost relevance ranking of search results (list of strings or comma-separated string).
     - custom_queries: Optional extra search queries merged with `search_queries`.
     - max_results: Maximum number of search results to return (1-10, default 5).
     - deep_fetch: If True, opens the top relevant pages in headless Chromium and extracts sanitized full text.
@@ -168,13 +169,16 @@ async def weber_search(
     max_results = max(1, min(10, max_results))
     deep_fetch_count = max(0, min(5, deep_fetch_count))
 
-    combined_ai_queries = _dedupe_queries([*(search_queries or []), *(custom_queries or [])])
+    parsed_search_queries = coerce_str_list(search_queries)
+    parsed_custom_queries = coerce_str_list(custom_queries)
+    parsed_keywords = coerce_str_list(intent_keywords)
+    combined_ai_queries = _dedupe_queries([*parsed_search_queries, *parsed_custom_queries])
     plan = await generate_query_plan_with_ai(
         raw_input=query,
         search_queries=combined_ai_queries or None,
         intent=intent,
         extracted_entity=extracted_entity,
-        intent_keywords=intent_keywords,
+        intent_keywords=parsed_keywords or None,
         language=language,
         ctx=ctx,
     )
@@ -228,7 +232,7 @@ async def weber_search(
         return "\n".join(sections)
 
     # Case 2: Conversational / keyword search via AI-generated queries + headless Chromium
-    all_queries = _dedupe_queries([*plan.expanded_queries, *(custom_queries or [])])
+    all_queries = _dedupe_queries([*plan.expanded_queries, *parsed_custom_queries])
     if not all_queries:
         all_queries = [query.strip()]
 
@@ -319,7 +323,7 @@ async def weber_search(
 @mcp.tool()
 async def weber_fetch_url(
     url: str,
-    wait_for_selector: str | None = None,
+    wait_for_selector: str = "",
     max_chars: int = 12000,
     extract_links: bool = False,
 ) -> str:
@@ -336,7 +340,7 @@ async def weber_fetch_url(
     try:
         result = await browser.fetch_page_headless(
             url=url,
-            wait_for_selector=wait_for_selector,
+            wait_for_selector=wait_for_selector.strip() or None,
             max_chars=max_chars,
             extract_links=extract_links,
         )
@@ -348,10 +352,10 @@ async def weber_fetch_url(
 @mcp.tool()
 async def weber_transform_query(
     question: str,
-    search_queries: list[str] | None = None,
+    search_queries: list[str] | str | None = None,
     intent: str = "general_search",
     extracted_entity: str = "",
-    intent_keywords: list[str] | None = None,
+    intent_keywords: list[str] | str | None = None,
     language: str = "auto",
     ctx: Context | None = None,
 ) -> str:
