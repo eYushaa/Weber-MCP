@@ -207,14 +207,11 @@ async def weber_search(
     # Case 1: User supplied one or more specific URLs
     if plan.is_direct_url and plan.detected_urls:
         fetched_pages: list[PageFetchResult] = []
-        blocked_count = 0
         for target_url in plan.detected_urls[: max(1, deep_fetch_count or 1)]:
             try:
                 res = await browser.fetch_page_headless(target_url, max_chars=12000, extract_links=True)
             except SecurityError as exc:
-                return f"## security_audit\nSecurity / Rate Limit Block: {exc}"
-            if not res.allowed:
-                blocked_count += 1
+                return f"### Security / Rate Limit Block\n- **URL:** `{target_url}`\n- **Reason:** {exc}"
             fetched_pages.append(res)
 
         query_analysis: dict[str, Any] = {
@@ -227,14 +224,6 @@ async def weber_search(
             "extracted_entity": plan.extracted_entity,
             "generated_queries": plan.expanded_queries,
         }
-        security_audit: dict[str, Any] = {
-            "mode": "direct_url_fetch",
-            "urls_inspected": len(fetched_pages),
-            "urls_blocked": blocked_count,
-            "rate_limit_remaining": _shared_rate_limiter.remaining(),
-            "browser_lifecycle": browser.get_browser_status(),
-            "sandbox": get_sandbox().get_compact_status_dict(),
-        }
 
         sections = [
             "## query_analysis",
@@ -245,9 +234,6 @@ async def weber_search(
             "",
             "## deep_fetched_pages",
             *[_format_page_fetch(p) for p in fetched_pages],
-            "",
-            "## security_audit",
-            "```json\n" + json.dumps(security_audit, ensure_ascii=False, indent=2) + "\n```",
         ]
         return "\n".join(sections)
 
@@ -263,10 +249,9 @@ async def weber_search(
             intent_keywords=plan.intent_keywords,
         )
     except SecurityError as exc:
-        return f"## security_audit\nSecurity / Rate Limit Block: {exc}"
+        return f"### Security / Rate Limit Block\n- **Reason:** {exc}"
 
     deep_pages: list[PageFetchResult] = []
-    skipped_deep_pages: list[dict[str, Any]] = []
     if deep_fetch and deep_fetch_count > 0 and search_exec.results:
         first_attempted: PageFetchResult | None = None
         candidates = search_exec.results[: min(len(search_exec.results), deep_fetch_count + 3)]
@@ -284,17 +269,11 @@ async def weber_search(
                 )
             if first_attempted is None:
                 first_attempted = page_res
-            usable, reason = _is_usable_deep_page(page_res)
+            usable, _ = _is_usable_deep_page(page_res)
             if usable:
                 deep_pages.append(page_res)
                 if len(deep_pages) >= deep_fetch_count:
                     break
-            else:
-                skipped_deep_pages.append({
-                    "url": hit.url,
-                    "status_code": page_res.status_code,
-                    "reason": reason,
-                })
         if not deep_pages and first_attempted is not None:
             deep_pages.append(first_attempted)
 
@@ -322,18 +301,6 @@ async def weber_search(
         for idx, h in enumerate(search_exec.results)
     ]
 
-    security_audit = {
-        "engines_tried": search_exec.engines_tried,
-        "blocked_search_urls": search_exec.blocked_urls,
-        "captcha_warnings": search_exec.captcha_warnings,
-        "search_errors": search_exec.errors,
-        "deep_fetched_count": len(deep_pages),
-        "skipped_deep_pages": skipped_deep_pages,
-        "rate_limit_remaining": _shared_rate_limiter.remaining(),
-        "browser_lifecycle": browser.get_browser_status(),
-        "sandbox": get_sandbox().get_compact_status_dict(),
-    }
-
     parts = [
         "## query_analysis",
         "```json\n" + json.dumps(query_analysis, ensure_ascii=False, indent=2) + "\n```",
@@ -346,13 +313,11 @@ async def weber_search(
     if deep_pages:
         parts.extend(_format_page_fetch(p) for p in deep_pages)
     else:
-        parts.append("Deep page fetch was not performed or no results were found.")
+        msg = "Deep page fetch was not performed or no results were found."
+        if search_exec.captcha_warnings:
+            msg += f" (captcha_warnings: {search_exec.captcha_warnings})"
+        parts.append(msg)
 
-    parts.extend([
-        "",
-        "## security_audit",
-        "```json\n" + json.dumps(security_audit, ensure_ascii=False, indent=2) + "\n```",
-    ])
     return "\n".join(parts)
 
 

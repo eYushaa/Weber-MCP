@@ -58,8 +58,8 @@ async def test_live_weber_search_metro_exodus() -> None:
         assert "Metro Exodus oyununun hikayesi" in report
         assert "Metro Exodus Hikayesi" in report
         assert "search_results" in report
-        assert "security_audit" in report
-        assert "skipped_deep_pages" in report
+        assert "deep_fetched_pages" in report
+        assert "## security_audit" not in report
         assert '"stripped_vars"' not in report
         # Ensure we actually got search hits OR a clear anti-bot report if engines gated
         assert ("http" in report) or ("captcha_warnings" in report)
